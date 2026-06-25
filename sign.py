@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-原神 国服米游社 自动签到
+米哈游 国服米游社 自动签到（原神 / 星铁 / 绝区零）
 - 多账号：COOKIE 用 # 或换行分隔
-- 通知：Server酱 Turbo（SCT_KEY），推送到微信
+- 多游戏：自动跳过没有角色的游戏
+- 通知：Server酱 Turbo（SCT_KEY）推送到微信，标题随结果高亮
 环境变量：
   COOKIE   必填，米游社 Cookie（多个用 # 分隔）
   SCT_KEY  选填，Server酱 Turbo 的 SENDKEY
@@ -18,19 +19,21 @@ import hashlib
 import requests
 
 # ============ 配置（接口/版本会变，失效时改这里）============
-# 国服原神现用 luna 新接口（/event/luna/...），act_id 见签到页 URL
-ACT_ID = "e202311201442471"  # 国服原神签到活动 ID
 LANG = "zh-cn"
-APP_VERSION = "2.71.1"       # 米游社 App 版本号，DS 校验需要时随官方更新
+APP_VERSION = "2.71.1"       # 米游社 App 版本号
 DS_SALT = "xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"  # web 端 DS salt（如失效需更新）
 
-ROLE_URL = "https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn"
-INFO_URL = "https://api-takumi.mihoyo.com/event/luna/info"
-HOME_URL = "https://api-takumi.mihoyo.com/event/luna/home"
-SIGN_URL = "https://api-takumi.mihoyo.com/event/luna/sign"
+# 各游戏配置：act_id 见各自签到页 URL，signgame 是 luna 接口区分游戏的标识
+# 原神 act_id 已实测；星铁/绝区零为通行值，若你玩且报错把签到页 URL 里的 act_id 发我更新
+GAMES = [
+    {"name": "原神",   "biz": "hk4e_cn",  "act_id": "e202311201442471", "signgame": "hk4e"},
+    {"name": "星铁",   "biz": "hkrpg_cn", "act_id": "e202304121516551", "signgame": "hkrpg"},
+    {"name": "绝区零", "biz": "nap_cn",   "act_id": "e202406242138391", "signgame": "nap"},
+]
 
-REFERER = ("https://act.mihoyo.com/bbs/event/signin/hk4e/index.html"
-           "?bbs_auth_required=true&act_id=" + ACT_ID)
+ROLE_URL = "https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie"
+INFO_URL = "https://api-takumi.mihoyo.com/event/luna/info"
+SIGN_URL = "https://api-takumi.mihoyo.com/event/luna/sign"
 
 
 def get_ds() -> str:
@@ -41,19 +44,19 @@ def get_ds() -> str:
     return f"{t},{r},{c}"
 
 
-def build_headers(cookie: str) -> dict:
+def build_headers(cookie: str, signgame: str) -> dict:
     return {
         "Cookie": cookie,
         "DS": get_ds(),
         "x-rpc-app_version": APP_VERSION,
         "x-rpc-client_type": "5",
         "x-rpc-platform": "4",
-        "x-rpc-signgame": "hk4e",  # luna 接口靠它区分游戏，原神=hk4e，缺了报 -500001
+        "x-rpc-signgame": signgame,  # luna 接口靠它区分游戏，缺了/错了报 -500001
         "x-rpc-channel": "appstore",
         "x-rpc-device_id": "".join(random.choices(string.hexdigits.lower(), k=32)),
         "User-Agent": (f"Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
                        f"AppleWebKit/605.1.15 (KHTML, like Gecko) miHoYoBBS/{APP_VERSION}"),
-        "Referer": REFERER,
+        "Referer": "https://act.mihoyo.com",
         "Origin": "https://act.mihoyo.com",
         "Accept": "application/json, text/plain, */*",
     }
@@ -63,41 +66,43 @@ class SignError(Exception):
     pass
 
 
-def get_roles(cookie: str) -> list:
-    """获取该 Cookie 下的原神角色列表。"""
-    r = requests.get(ROLE_URL, headers=build_headers(cookie), timeout=20).json()
+def get_roles(cookie: str, game: dict) -> list:
+    """获取该 Cookie 下某游戏的角色列表（无角色返回空，不报错）。"""
+    r = requests.get(
+        ROLE_URL, params={"game_biz": game["biz"]},
+        headers=build_headers(cookie, game["signgame"]), timeout=20,
+    ).json()
     if r.get("retcode") != 0:
         raise SignError(f"获取角色失败: {r.get('message')} (retcode={r.get('retcode')})")
-    roles = (r.get("data") or {}).get("list") or []
-    if not roles:
-        raise SignError("该账号下没有原神角色，请确认 Cookie 是国服账号")
-    return roles
+    return (r.get("data") or {}).get("list") or []
 
 
-def sign_one_role(cookie: str, role: dict) -> str:
+def sign_one_role(cookie: str, game: dict, role: dict) -> str:
     """对单个角色签到，返回结果文本。"""
+    tag = f"[{game['name']}]"
     region = role["region"]
     uid = role["game_uid"]
     nickname = role.get("nickname", uid)
-    headers = build_headers(cookie)
+    act_id = game["act_id"]
+    headers = build_headers(cookie, game["signgame"])
 
     # 已签天数信息
     info = requests.get(
-        INFO_URL, params={"lang": LANG, "act_id": ACT_ID, "region": region, "uid": uid},
+        INFO_URL, params={"lang": LANG, "act_id": act_id, "region": region, "uid": uid},
         headers=headers, timeout=20,
     ).json()
     if info.get("retcode") != 0:
-        return (f"❌ {nickname}({uid}) 查询签到信息失败: {info.get('message')} "
+        return (f"❌ {tag} {nickname}({uid}) 查询失败: {info.get('message')} "
                 f"(retcode={info.get('retcode')})")
     data = info.get("data") or {}
     if data.get("is_sign"):
         total = data.get("total_sign_day", "?")
-        return f"➖ {nickname}({uid}) 今天已签过，本月累计 {total} 天"
+        return f"➖ {tag} {nickname}({uid}) 今天已签过，本月累计 {total} 天"
 
     # 执行签到
     resp = requests.post(
         SIGN_URL,
-        json={"act_id": ACT_ID, "region": region, "uid": uid, "lang": LANG},
+        json={"act_id": act_id, "region": region, "uid": uid, "lang": LANG},
         headers=headers, timeout=20,
     ).json()
     retcode = resp.get("retcode")
@@ -105,24 +110,43 @@ def sign_one_role(cookie: str, role: dict) -> str:
 
     if retcode == 0 and not rdata.get("risk_code"):
         total = (data.get("total_sign_day") or 0) + 1
-        return f"✅ {nickname}({uid}) 签到成功，本月累计 {total} 天"
+        return f"✅ {tag} {nickname}({uid}) 签到成功，本月累计 {total} 天"
     if retcode == -5003:
-        return f"➖ {nickname}({uid}) 今天已签过"
+        return f"➖ {tag} {nickname}({uid}) 今天已签过"
     if rdata.get("risk_code") or rdata.get("gt"):
-        return f"⚠️ {nickname}({uid}) 触发了验证码(geetest)，本次签到被拦截，需人工或打码"
-    return f"❌ {nickname}({uid}) 签到失败: {resp.get('message')} (retcode={retcode})"
+        return f"⚠️ {tag} {nickname}({uid}) 触发验证码(geetest)，被拦截，需人工补签"
+    return f"❌ {tag} {nickname}({uid}) 签到失败: {resp.get('message')} (retcode={retcode})"
 
 
 def run_account(cookie: str, idx: int) -> str:
     head = f"【账号{idx}】"
-    try:
-        roles = get_roles(cookie)
-        lines = [sign_one_role(cookie, role) for role in roles]
-        return head + "\n" + "\n".join(lines)
-    except SignError as e:
-        return f"{head}\n❌ {e}"
-    except Exception as e:  # noqa: BLE001
-        return f"{head}\n❌ 异常: {e}"
+    lines = []
+    for game in GAMES:
+        try:
+            roles = get_roles(cookie, game)
+        except SignError as e:
+            lines.append(f"❌ [{game['name']}] {e}")
+            continue
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"❌ [{game['name']}] 异常: {e}")
+            continue
+        if not roles:
+            continue  # 没这个游戏的角色，静默跳过
+        for role in roles:
+            lines.append(sign_one_role(cookie, game, role))
+            time.sleep(random.uniform(1, 3))
+    if not lines:
+        lines.append("⚠️ 未找到任何游戏角色，请检查 Cookie 是否有效/为国服账号")
+    return head + "\n" + "\n".join(lines)
+
+
+def status_emoji(text: str) -> str:
+    """根据结果给通知标题选高亮图标。"""
+    if "❌" in text:
+        return "❌"
+    if "⚠️" in text:
+        return "⚠️"
+    return "✅"
 
 
 def notify(title: str, content: str):
@@ -155,7 +179,7 @@ def main():
         time.sleep(random.uniform(2, 5))  # 账号间随机间隔，降低风控
 
     summary = "\n\n".join(results)
-    notify("原神签到结果", summary)
+    notify(f"{status_emoji(summary)} 米哈游签到结果", summary)
 
 
 if __name__ == "__main__":
