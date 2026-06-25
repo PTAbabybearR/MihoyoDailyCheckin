@@ -10,20 +10,27 @@
 
 ## 一、获取米游社 Cookie
 
-### 方法 A：小工具自动读取（推荐，省去开发者工具）
+### 方法 A：扫码登录（推荐，不依赖浏览器）
 
-前提：在浏览器里登录了 mihoyo.com。
+```bash
+pip install requests qrcode pillow
+python qr_login.py
+```
+
+运行后会弹出二维码图片 → 用 **米游社 App** 扫一扫 → 手机上确认登录 → 脚本自动换出整段 Cookie 并打印，复制粘贴到 GitHub 的 `COOKIE` Secret 即可。失效后重跑一次即可。
+
+### 方法 B：从浏览器读取（Edge/Chrome 新版加密可能读不到）
+
+前提：浏览器里登录了 mihoyo.com。
 
 ```bash
 pip install browser_cookie3
 python get_cookie.py
 ```
 
-脚本会从浏览器直接读出整段 Cookie 并打印，复制粘贴到 GitHub 的 `COOKIE` Secret 即可。
+> Edge/Chrome 新版对 Cookie 做了 App-Bound 加密，常常读取失败；读不到就用方法 A。
 
-> Edge/Chrome 新版对 Cookie 做了加密，需用 **管理员身份** 打开 PowerShell 再运行；读取不到就改用下面的手动法。
-
-### 方法 B：开发者工具手动抓（兜底）
+### 方法 C：开发者工具手动抓（兜底）
 
 1. 电脑浏览器打开并登录 <https://user.mihoyo.com/>（或米游社 <https://bbs.mihoyo.com/>）。
 2. 打开签到页 <https://act.mihoyo.com/bbs/event/signin/hk4e/index.html?bbs_auth_required=true&act_id=e202311201442471>。
