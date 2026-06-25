@@ -86,7 +86,8 @@ def sign_one_role(cookie: str, role: dict) -> str:
         headers=headers, timeout=20,
     ).json()
     if info.get("retcode") != 0:
-        return f"❌ {nickname}({uid}) 查询签到信息失败: {info.get('message')}"
+        return (f"❌ {nickname}({uid}) 查询签到信息失败: {info.get('message')} "
+                f"(retcode={info.get('retcode')})")
     data = info.get("data") or {}
     if data.get("is_sign"):
         total = data.get("total_sign_day", "?")
