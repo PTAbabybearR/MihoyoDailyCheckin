@@ -1,25 +1,45 @@
 # MihoyoDailyCheckin · 米哈游国服每日签到
 
-米游社（国服）原神每日签到，跑在 **GitHub Actions** 上定时执行，结果通过 **Server酱** 推送到微信。
+国服米游社每日签到，跑在 **GitHub Actions** 上每天定时执行，结果通过 **Server酱** 推送到微信。
 
-## 工作原理
+- 🎮 **多游戏**：一个 Cookie 同时签 **原神 / 星铁 / 绝区零**，没玩的游戏自动跳过
+- 👥 **多账号**：`COOKIE` 用 `#` 分隔即可
+- 🔔 **微信通知**：标题随结果高亮（✅ 成功 / ⚠️ 验证码 / ❌ 失败）
+- 📷 **扫码取 Cookie**：自带扫码登录工具，不用开发者工具手动抓
+- ☁️ **全自动**：部署后无需开机，云端每天自动跑
 
-每天定时调用米游社签到接口（`api-takumi.mihoyo.com`），自动领取每日签到奖励，并把结果推送到你的微信。
+> ⚠️ **关于验证码**：国服签到接口会**随机触发 geetest 极验验证码**。多数情况能正常签到，偶尔被拦时通知里会显示「触发验证码」——这是国服自动签到的固有限制，不是 bug，隔天一般自动恢复，手动补签即可。
+>
+> ⚠️ **风险提示**：自动签到属灰色地带，理论上有风险（实际极罕见）。介意者请勿使用。Cookie 等于账号登录态，**只填进 GitHub Secrets，切勿发给他人或提交到公开代码**。
 
-> ⚠️ **关于验证码**：国服米游社签到接口会**随机触发 geetest 极验验证码**。大多数情况下脚本能正常签到，但偶尔会被拦截，此时通知里会显示「触发了验证码」。这是国服自动签到的固有限制，不是脚本 bug。如果频繁被拦，再考虑接入打码服务。
+---
+
+## 文件说明
+
+| 文件 | 作用 |
+|---|---|
+| `sign.py` | 签到主逻辑（多游戏 / 多账号 / 通知） |
+| `qr_login.py` | 扫码登录获取 Cookie 的工具 |
+| `扫码取Cookie.cmd` | 双击即可运行 `qr_login.py`（免敲命令） |
+| `get_cookie.py` | 从浏览器直接读取 Cookie（备用） |
+| `.github/workflows/checkin.yml` | GitHub Actions 定时任务 |
+
+---
 
 ## 一、获取米游社 Cookie
 
 ### 方法 A：扫码登录（推荐，不依赖浏览器）
+
+双击 **`扫码取Cookie.cmd`**，或手动运行：
 
 ```bash
 pip install requests qrcode pillow
 python qr_login.py
 ```
 
-运行后会弹出二维码图片 → 用 **米游社 App** 扫一扫 → 手机上确认登录 → 脚本自动换出整段 Cookie 并打印，复制粘贴到 GitHub 的 `COOKIE` Secret 即可。失效后重跑一次即可。
+弹出二维码图片 → 用 **米游社 App** 扫一扫（要快，二维码 1~2 分钟过期）→ 手机上确认登录 → 脚本自动取出整段 Cookie 并打印，复制粘贴到 GitHub 的 `COOKIE` Secret 即可。失效后重跑一次。
 
-### 方法 B：从浏览器读取（Edge/Chrome 新版加密可能读不到）
+### 方法 B：从浏览器读取（备用）
 
 前提：浏览器里登录了 mihoyo.com。
 
@@ -28,31 +48,33 @@ pip install browser_cookie3
 python get_cookie.py
 ```
 
-> Edge/Chrome 新版对 Cookie 做了 App-Bound 加密，常常读取失败；读不到就用方法 A。
+> Edge/Chrome 新版对 Cookie 做了 App-Bound 加密，常读取失败；读不到就用方法 A。
 
 ### 方法 C：开发者工具手动抓（兜底）
 
-1. 电脑浏览器打开并登录 <https://user.mihoyo.com/>（或米游社 <https://bbs.mihoyo.com/>）。
-2. 打开签到页 <https://act.mihoyo.com/bbs/event/signin/hk4e/index.html?bbs_auth_required=true&act_id=e202311201442471>。
-3. 按 `F12` 打开开发者工具 → `Network`（网络）面板，**勾选「禁用缓存」**，刷新页面，并点 `Fetch/XHR` 只看接口。
-4. 随便点一个发往 `api-takumi.mihoyo.com` 的请求 → `Headers` → 找到请求头里的 `Cookie`，**整段复制**。
-   - 必须包含 `cookie_token`/`account_id` 或 `ltoken`/`ltuid`/`stoken` 等字段。
-5. 多个账号：把每个账号的 Cookie 用 `#` 连接成一行，例如 `cookieA#cookieB`。
+1. 电脑浏览器登录米游社，打开签到页 <https://act.mihoyo.com/bbs/event/signin/hk4e/index.html?bbs_auth_required=true&act_id=e202311201442471>。
+2. 按 `F12` → `Network`（网络）面板，**勾选「禁用缓存」**，点 `Fetch/XHR`，刷新页面。
+3. 点一个发往 `api-takumi.mihoyo.com` 的请求 → `Headers` → 复制请求头里的整段 `Cookie`。
+   - 需包含 `cookie_token`/`account_id` 或 `ltoken`/`ltuid` 等字段。
 
-## 二、获取 Server酱 SENDKEY
+> 多账号：把每个账号的 Cookie 用 `#` 连成一行，如 `cookieA#cookieB`。
+
+## 二、获取 Server酱 SENDKEY（微信通知，可选）
 
 1. 打开 <https://sct.ftqq.com/> 用微信扫码登录。
 2. 复制 **SENDKEY**（形如 `SCTxxxxxxxxxxxx`）。
-3. 在 Server酱后台「消息通道」里绑定微信，确保能收到推送。
+3. 在后台「消息通道」绑定微信，确保能收到推送。
+
+> 不配 `SCT_KEY` 也能签到，只是没有微信通知，结果只在 Actions 日志里看。
 
 ## 三、部署到 GitHub Actions
 
-1. 把本项目推到你自己的 GitHub 仓库（建议设为 **Private**，Cookie 不外泄）。
+1. **Fork** 本仓库到你自己账号（或新建仓库放入这些文件）。
 2. 仓库 → `Settings` → `Secrets and variables` → `Actions` → `New repository secret`，添加：
-   - `COOKIE`：上面拿到的米游社 Cookie。
-   - `SCT_KEY`：Server酱 SENDKEY（不想要通知可不填）。
-3. 仓库 → `Actions` → 选中 `Genshin Daily Check-in` → `Run workflow` 手动触发一次，验证能跑通。
-4. 之后每天北京时间 ~8:30 自动执行（GitHub cron 有延迟，属正常）。
+   - `COOKIE`：上面拿到的米游社 Cookie（必填）。
+   - `SCT_KEY`：Server酱 SENDKEY（可选）。
+3. 仓库 → `Actions` → 选 `Mihoyo Daily Check-in` → `Run workflow` 手动跑一次验证。
+4. 之后每天 **北京时间约 8:30** 自动执行（GitHub cron 有延迟，属正常）。
 
 ## 四、本地测试
 
@@ -66,6 +88,15 @@ $env:COOKIE="你的Cookie"; $env:SCT_KEY="你的SENDKEY"; python sign.py
 COOKIE="你的Cookie" SCT_KEY="你的SENDKEY" python sign.py
 ```
 
+---
+
 ## 维护说明
 
-接口、`APP_VERSION`、`DS_SALT`、`ACT_ID` 都可能随官方更新而失效，对应常量集中在 [sign.py](sign.py) 顶部，失效时改那里即可。
+国服接口、签名、活动 ID 会随官方更新而变化，相关常量都集中在 [sign.py](sign.py) 顶部：
+
+- **`GAMES`**：每个游戏的 `act_id`（签到活动 ID，见签到页 URL）和 `signgame`（luna 接口区分游戏的标识）。
+  - 已实测：原神 `hk4e` / 星铁 `hkrpg` / 绝区零 `zzz`（注意绝区零的 biz 是 `nap_cn` 但 signgame 是 `zzz`，是个例外）。
+  - 新增游戏或某游戏报 `retcode=-500001`，多半是 `act_id` 或 `signgame` 需更新。
+- **`DS_SALT` / `APP_VERSION`**：DS 动态签名用，被风控时可能需要跟随官方更新。
+
+扫码工具 [qr_login.py](qr_login.py) 顶部的 `SALT`（passport DS 盐）同理，失效时更新。
